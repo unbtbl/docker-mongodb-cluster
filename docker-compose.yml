@@ -1,0 +1,113 @@
+name: my-mongo-cluster
+
+services:
+  # Uncomment and modify the following section to include your application.
+  # Ensure that the application is configured to connect to the MongoDB replica set.
+
+  # app:
+  #   image: my-app:latest
+  #   depends_on:
+  #     mongo-init-replica:
+  #       condition: service_completed_successfully
+  #     mongo1:
+  #       condition: service_healthy
+  #   command:
+  #     ["--hostname", "0.0.0.0", "--mongo-db", "mongodb://mongo1:27017/my db"]
+
+  mongo1:
+    image: mongo:7-jammy
+    stop_grace_period: 30s
+    ports:
+      - 27017:27017
+    volumes:
+      - mongo1-data:/data/db
+    command: ["--replSet", "rs0", "--quiet"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+
+  mongo2:
+    image: mongo:7-jammy
+    stop_grace_period: 30s
+    ports:
+      - 27018:27017
+    volumes:
+      - mongo2-data:/data/db
+    command: ["--replSet", "rs0", "--quiet"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+
+  mongo3:
+    image: mongo:7-jammy
+    stop_grace_period: 30s
+    ports:
+      - 27019:27017
+    volumes:
+      - mongo3-data:/data/db
+    command: ["--replSet", "rs0", "--quiet"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+
+  mongo-init-replica:
+    image: mongo:7-jammy
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      mongo2:
+        condition: service_healthy
+      mongo3:
+        condition: service_healthy
+    command: >
+      bash -c '
+        mongosh --host mongo1:27017 --eval "
+          let status = 0;
+          try {
+            status = rs.status().myState;
+          } catch (e) {
+            status = -1;
+          }
+
+          if (status > 0) {
+            print(\"Replica set already initiated.\");
+          } else {
+            rs.initiate({
+              _id: \"rs0\",
+              members: [
+                { _id: 0, host: \"mongo1:27017\" },
+                { _id: 1, host: \"mongo2:27017\" },
+                { _id: 2, host: \"mongo3:27017\" }
+              ]
+            });
+          }
+          let attempts = 0;
+          const maxAttempts = 120 / 0.5; // Timeout after 2 minutes
+          while (true) {
+            const rsStatus = rs.status();
+            const primaryExists = rsStatus.members.some(member => member.state === 1);
+            if (primaryExists) {
+              print(\"Replica set is fully operational.\");
+              break;
+            } else if (attempts >= maxAttempts) {
+              print(\"Failed to initialize replica set within the timeout period.\");
+              break;
+            } else {
+              print(\"Waiting for replica set to initialize...\");
+              sleep(500);
+              attempts++;
+            }
+          }
+        "
+      '
+
+volumes:
+  mongo1-data:
+  mongo2-data:
+  mongo3-data:
